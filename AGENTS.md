@@ -14,6 +14,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - DB schema lives in `db/schema.ts` as append-only numbered migrations (`PRAGMA user_version`); later milestones (stores/products/prices tables) add versions there, never edit applied ones.
 - The recipe→shopping-list merge contract is the pure module `lib/shoppingList.ts` (shared `shoppingListKey` between aggregation and `shopping_list_items` rows); keep it dependency-free and covered by `__tests__/`.
+- Planning (household size, meal scope, scaling, budget fit) is the pure module `lib/planner.ts`; it scales recipes then reuses `buildShoppingList`. Prices enter only via its `PriceEstimator` (integer cents, `null` = unknown) — swap `placeholderEstimator` for a real source rather than adding price logic elsewhere.
 - Privacy boundary is product-mandated: on-device `expo-sqlite` only — no accounts, analytics, telemetry, or any network-egress code (see README + plan report).
 - `expo-symbols` name objects: iOS takes SF Symbols (`list.bullet`), Android/web take Material Symbols snake_case (`format_list_bulleted`).
 
