@@ -34,7 +34,15 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Meal Prepper uses your location while the app is open to list nearby grocery stores. Only a rounded location (about 1 km) is sent to OpenStreetMap.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isIosBackgroundLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

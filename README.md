@@ -3,7 +3,8 @@
 Personal meal-prepper mobile app (Expo / React Native, Android + iPhone): turn
 recipes (entered by form or photo) into shopping lists, find the nearest
 low-cost grocery stores, and compare prices with Walmart as the baseline.
-Local-first so recipes stay private on-device — nothing leaves the phone.
+Local-first: recipes, shopping lists, and everything else stay on-device. The
+one exception is the nearby-store lookup described under **Privacy**.
 
 ## Status
 
@@ -22,8 +23,19 @@ currently ships milestone **M1**: "recipe in → shopping list out".
 - **Stores & Prices tab** — placeholder; stores, location, and prices come in
   later milestones.
 
-No accounts, no analytics, no network calls: all data stays in the on-device
-SQLite database.
+## Privacy
+
+No accounts, no analytics, no telemetry. Recipes and shopping lists live only
+in the on-device SQLite database and never leave the phone.
+
+The only network request the app makes is the nearby-store lookup on the
+Stores & Prices tab: when you open it (or pull to refresh) with location
+permission granted, the app sends your location **rounded to about 1 km**
+(two decimal places) to OpenStreetMap's public Overpass API
+(`overpass-api.de`, falling back to `overpass.kumi.systems`) to fetch grocery
+stores within ~5 miles. Your precise location is used only on the phone to
+compute distances and is never sent or stored. Nothing else — no recipes, no
+lists, no identifiers — is included in that request.
 
 ## Run it
 
