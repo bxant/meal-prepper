@@ -79,6 +79,26 @@ function TabNavigator() {
         }}
       />
       <Tabs.Screen
+        name="shopping"
+        options={{
+          title: 'Shopping List',
+          tabBarLabel: 'Shopping',
+          // Unchecked items left to buy; no badge once everything is ticked off.
+          tabBarBadge: summary.remaining > 0 ? summary.remaining : undefined,
+          tabBarIcon: ({ color }) => (
+            <SymbolView
+              name={{
+                ios: 'checklist',
+                android: 'checklist',
+                web: 'checklist',
+              }}
+              tintColor={color}
+              size={28}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="stores"
         options={{
           title: 'Stores & Prices',
