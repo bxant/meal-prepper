@@ -18,6 +18,23 @@ export default function TabLayout() {
         headerShown: useClientOnlyValue(false, true),
       }}>
       <Tabs.Screen
+        name="plan"
+        options={{
+          title: 'Plan',
+          tabBarIcon: ({ color }) => (
+            <SymbolView
+              name={{
+                ios: 'calendar',
+                android: 'calendar_month',
+                web: 'calendar_month',
+              }}
+              tintColor={color}
+              size={28}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="index"
         options={{
           title: 'Recipes',
@@ -48,23 +65,6 @@ export default function TabLayout() {
                 )}
               </Pressable>
             </Link>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="plan"
-        options={{
-          title: 'Plan',
-          tabBarIcon: ({ color }) => (
-            <SymbolView
-              name={{
-                ios: 'calendar',
-                android: 'calendar_month',
-                web: 'calendar_month',
-              }}
-              tintColor={color}
-              size={28}
-            />
           ),
         }}
       />
