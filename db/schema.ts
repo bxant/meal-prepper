@@ -8,7 +8,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  * tracked with `PRAGMA user_version`. Later milestones (stores, products,
  * prices) only append new versions here.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const MIGRATIONS: Record<number, string> = {
   1: `
@@ -46,6 +46,14 @@ const MIGRATIONS: Record<number, string> = {
       created_at INTEGER NOT NULL
     );
   `,
+  // Nutrition estimate inputs. All nullable so existing recipes keep working:
+  // NULL servings = not set yet; NULL grams / nutrition_food_id = derive from
+  // quantity + unit and match by name.
+  2: `
+    ALTER TABLE recipes ADD COLUMN servings INTEGER CHECK (servings IS NULL OR servings > 0);
+    ALTER TABLE ingredients ADD COLUMN grams REAL CHECK (grams IS NULL OR grams >= 0);
+    ALTER TABLE ingredients ADD COLUMN nutrition_food_id TEXT;
+  `,
 };
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
@@ -57,7 +65,11 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
     if (!sql) {
       throw new Error(`Missing migration for schema version ${version}`);
     }
-    await db.execAsync(sql);
-    await db.execAsync(`PRAGMA user_version = ${version}`);
+    // One transaction per version, so a failed migration leaves the DB at the
+    // previous version instead of half-applied (ALTER TABLE can't be re-run).
+    await db.withTransactionAsync(async () => {
+      await db.execAsync(sql);
+      await db.execAsync(`PRAGMA user_version = ${version}`);
+    });
   }
 }

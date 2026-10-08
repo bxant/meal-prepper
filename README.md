@@ -11,9 +11,15 @@ one exception is the nearby-store lookup described under **Privacy**.
 Under active development. The build plan lives in the planning report; the app
 currently ships milestone **M1**: "recipe in → shopping list out".
 
-- **Recipes tab** — save recipes typed into a form (title + ingredients with
-  quantities), stored in a local `expo-sqlite` database. Tap a recipe to see
-  its ingredients.
+- **Recipes tab** — save recipes typed into a form (title, servings, and
+  ingredients with quantities and an optional weight in grams), stored in a
+  local `expo-sqlite` database. Tap a recipe to see its ingredients.
+- **Nutrition estimate** — the recipe screen shows estimated calories,
+  protein, carbs, fat, and fiber, both per serving and per 100 g of the mixed
+  ingredients. Amounts are converted to grams and looked up in a bundled
+  offline table derived from USDA FoodData Central (public domain). Tap an
+  ingredient to enter its exact weight or pick the right food. See
+  [docs/nutrition-data.md](docs/nutrition-data.md).
 - **Shopping list** — one aggregated, checkable list built from the ingredients
   of all saved recipes.
 - **Plan tab** — placeholder planning panel: household size, meal scope (one
