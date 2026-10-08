@@ -1,5 +1,7 @@
 import * as Location from 'expo-location';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -11,48 +13,125 @@ import {
   View,
 } from 'react-native';
 
-import { formatDistance } from '@/lib/geo';
-import type { NearbyStore } from '@/lib/nearbyStores';
+import { StoreCard } from '@/components/stores/StoreCard';
+import { TripCard } from '@/components/stores/TripCard';
+import { useStoreAvailability } from '@/components/stores/useStoreAvailability';
+import { listRecipesWithIngredients } from '@/db/recipes';
+import { listShoppingListItems } from '@/db/shoppingList';
+import type { LatLng } from '@/lib/geo';
+import { createKrogerCatalog } from '@/lib/kroger';
+import {
+  DEFAULT_DISTANCE_MILES,
+  DISTANCE_OPTIONS_MILES,
+  selectStores,
+  withinMiles,
+  type DistanceMiles,
+  type NearbyStore,
+  type StoreSort,
+} from '@/lib/nearbyStores';
 import { fetchNearbyStores, StoreLookupError } from '@/lib/overpass';
-import { TIER_LABEL, type PriceTier } from '@/lib/storeTiers';
+import { averagePriceEstimator } from '@/lib/prices/estimate';
+import { sampleCatalog } from '@/lib/sampleAvailability';
+import { DEFAULT_SETTINGS, hasKrogerCredentials, loadSettings, type AppSettings } from '@/lib/settings';
+import { buildShoppingList, type ShoppingListLine } from '@/lib/shoppingList';
+import { remainingLines } from '@/lib/shoppingListSummary';
+import {
+  coverageBucket,
+  rankStoresWithCoverage,
+  summarizeAvailability,
+  type StoreCatalog,
+} from '@/lib/storeAvailability';
+import { alternativesForStop, planTrip, recommendStores, swapStore } from '@/lib/tripPlanner';
 
 type ScreenState =
   | { kind: 'intro' }
-  | { kind: 'loading' }
+  | { kind: 'loading'; miles: number }
   | { kind: 'denied'; canAskAgain: boolean }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; stores: NearbyStore[] };
+  | { kind: 'ready' };
+
+/** What the last successful lookup returned: every store within `radiusMiles` of `origin`. */
+interface Lookup {
+  /** Precise device position; stays on the phone. */
+  origin: LatLng;
+  radiusMiles: number;
+  stores: NearbyStore[];
+}
+
+const SORT_OPTIONS: { value: StoreSort; label: string }[] = [
+  { value: 'price', label: 'Cheapest first' },
+  { value: 'distance', label: 'Nearest first' },
+];
 
 export default function StoresScreen() {
+  const db = useSQLiteContext();
   const [state, setState] = useState<ScreenState>({ kind: 'intro' });
+  const [lookup, setLookup] = useState<Lookup | null>(null);
+  const [distance, setDistance] = useState<DistanceMiles>(DEFAULT_DISTANCE_MILES);
+  const [sort, setSort] = useState<StoreSort>('price');
   const [refreshing, setRefreshing] = useState(false);
+  const [lines, setLines] = useState<ShoppingListLine[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  /** Stores the user picked for the trip; null = use the suggestion. */
+  const [chosenIds, setChosenIds] = useState<string[] | null>(null);
   const mounted = useRef(true);
+  /** Bumped per lookup so a slow, outdated response can't overwrite a newer one. */
+  const generation = useRef(0);
 
-  const update = useCallback((next: ScreenState) => {
-    if (mounted.current) setState(next);
-  }, []);
-
-  const lookup = useCallback(async () => {
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        update({ kind: 'denied', canAskAgain: permission.canAskAgain });
-        return;
-      }
-      if (!(await Location.hasServicesEnabledAsync())) {
-        update({
-          kind: 'error',
-          message: 'Location services are turned off. Turn them on in your phone settings and try again.',
+  // The shopping list and keys can change on other screens; reload on focus.
+  useFocusEffect(
+    useCallback(() => {
+      Promise.all([listRecipesWithIngredients(db), listShoppingListItems(db)])
+        .then(([recipes, items]) => {
+          if (mounted.current) setLines(remainingLines(buildShoppingList(recipes), items));
+        })
+        .catch(() => {
+          // Local-only read; keep the current list on failure.
         });
-        return;
+      loadSettings()
+        .then((value) => {
+          if (mounted.current) setSettings(value);
+        })
+        .catch(() => {});
+    }, [db])
+  );
+
+  const lineKey = lines.map((l) => l.key).join('\n');
+  useEffect(() => {
+    // A different list means a different best trip.
+    setChosenIds(null);
+  }, [lineKey]);
+
+  /** Find stores within `miles`; reuse `origin` when given instead of a fresh GPS fix. */
+  const lookUp = useCallback(async (miles: number, origin?: LatLng) => {
+    const id = ++generation.current;
+    const current = () => mounted.current && id === generation.current;
+    try {
+      let position = origin;
+      if (!position) {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (!permission.granted) {
+          if (current()) setState({ kind: 'denied', canAskAgain: permission.canAskAgain });
+          return;
+        }
+        if (!(await Location.hasServicesEnabledAsync())) {
+          if (current()) {
+            setState({
+              kind: 'error',
+              message: 'Location services are turned off. Turn them on in your phone settings and try again.',
+            });
+          }
+          return;
+        }
+        position = (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })).coords;
       }
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      const stores = await fetchNearbyStores(position.coords);
-      update({ kind: 'ready', stores });
+      const stores = await fetchNearbyStores(position, miles);
+      if (!current()) return;
+      setLookup({ origin: { latitude: position.latitude, longitude: position.longitude }, radiusMiles: miles, stores });
+      setState({ kind: 'ready' });
     } catch (e) {
-      update({
+      if (!current()) return;
+      setState({
         kind: 'error',
         message:
           e instanceof StoreLookupError
@@ -60,18 +139,31 @@ export default function StoresScreen() {
             : "Couldn't get your location. Make sure location is on and try again.",
       });
     }
-  }, [update]);
+  }, []);
 
   const start = useCallback(() => {
-    setState({ kind: 'loading' });
-    void lookup();
-  }, [lookup]);
+    setState({ kind: 'loading', miles: distance });
+    void lookUp(distance);
+  }, [distance, lookUp]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    await lookup();
+    await lookUp(distance);
     if (mounted.current) setRefreshing(false);
-  }, [lookup]);
+  }, [distance, lookUp]);
+
+  const chooseDistance = (miles: DistanceMiles) => {
+    setDistance(miles);
+    setChosenIds(null);
+    // Already have every store this close: just filter. Otherwise search wider.
+    if (lookup && miles <= lookup.radiusMiles) {
+      generation.current += 1; // Drop any wider search still in flight.
+      setState({ kind: 'ready' });
+      return;
+    }
+    setState({ kind: 'loading', miles });
+    void lookUp(miles, lookup?.origin);
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -86,7 +178,53 @@ export default function StoresScreen() {
     return () => {
       mounted.current = false;
     };
-  }, [start]);
+    // Only on mount; later lookups come from the user.
+  }, []);
+
+  // Live Kroger data when keys are set (one catalog per key pair, so its
+  // session cache survives re-renders), then sample data if the demo is on.
+  const { krogerClientId, krogerClientSecret, demoAvailability } = settings;
+  const catalogs = useMemo<StoreCatalog[]>(() => {
+    const list: StoreCatalog[] = [];
+    if (hasKrogerCredentials({ krogerClientId, krogerClientSecret })) {
+      list.push(createKrogerCatalog({ clientId: krogerClientId, clientSecret: krogerClientSecret }));
+    }
+    if (demoAvailability) list.push(sampleCatalog);
+    return list;
+  }, [krogerClientId, krogerClientSecret, demoAvailability]);
+
+  const nearby = useMemo(
+    () => (lookup ? withinMiles(lookup.stores, distance) : []),
+    [lookup, distance]
+  );
+  const availability = useStoreAvailability(nearby, lines, catalogs);
+
+  const visible = useMemo(() => {
+    if (!lookup) return [];
+    const bucketOf = (store: NearbyStore) =>
+      coverageBucket(summarizeAvailability(lines, availability.table[store.id]));
+    return selectStores(lookup.stores, distance, sort, (stores) => rankStoresWithCoverage(stores, bucketOf));
+  }, [lookup, distance, sort, lines, availability.table]);
+
+  const suggested = useMemo(
+    () => recommendStores(nearby, lines, availability.table),
+    [nearby, lines, availability.table]
+  );
+  const chosen = chosenIds ?? suggested;
+  const plan = useMemo(
+    () =>
+      lookup && lines.length > 0
+        ? planTrip(lookup.origin, nearby, chosen, lines, availability.table, averagePriceEstimator)
+        : null,
+    [lookup, nearby, chosen, lines, availability.table]
+  );
+  const stopNumber = useMemo(
+    () => new Map((plan?.stops ?? []).map((stop, i) => [stop.store.id, i + 1])),
+    [plan]
+  );
+
+  const toggleTrip = (storeId: string) =>
+    setChosenIds(chosen.includes(storeId) ? chosen.filter((id) => id !== storeId) : [...chosen, storeId]);
 
   switch (state.kind) {
     case 'intro':
@@ -101,7 +239,7 @@ export default function StoresScreen() {
       return (
         <View style={styles.center}>
           <ActivityIndicator size="large" />
-          <Text style={styles.loadingText}>Finding grocery stores near you…</Text>
+          <Text style={styles.loadingText}>Finding grocery stores within {state.miles} mi…</Text>
         </View>
       );
     case 'denied':
@@ -118,54 +256,163 @@ export default function StoresScreen() {
       );
     case 'error':
       return (
-        <Message
-          title="Couldn't load stores"
-          body={state.message}
-          action={{ label: 'Try again', onPress: start }}
-        />
+        <View style={styles.flex}>
+          <DistanceBar distance={distance} onChange={chooseDistance} />
+          <Message
+            title="Couldn't load stores"
+            body={state.message}
+            action={{ label: 'Try again', onPress: start }}
+          />
+        </View>
       );
-    case 'ready':
+    case 'ready': {
+      const wider = DISTANCE_OPTIONS_MILES.find((m) => m > distance);
       return (
         <FlatList
-          data={state.stores}
+          data={visible}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
           ListHeaderComponent={
-            state.stores.length > 0 ? (
-              <Text style={styles.listHeader}>
-                Sorted by estimated price tier, then distance. Tiers are a rough guess from the
-                chain name — real prices aren’t available yet.
-              </Text>
-            ) : null
+            <View>
+              <DistanceBar distance={distance} onChange={chooseDistance} />
+              <ChipRow
+                label="Order"
+                options={SORT_OPTIONS}
+                value={sort}
+                onChange={setSort}
+              />
+              {visible.length > 0 && (
+                <>
+                  <TripCard
+                    itemCount={lines.length}
+                    plan={plan}
+                    checking={availability.checking}
+                    customized={chosenIds !== null}
+                    alternativesFor={(stop) =>
+                      alternativesForStop(stop, nearby, chosen, availability.table)
+                    }
+                    onSwap={(fromId, toId) => setChosenIds(swapStore(chosen, fromId, toId))}
+                    onReset={() => setChosenIds(null)}
+                  />
+                  <SourceNote settings={settings} errors={availability.errors} hasLines={lines.length > 0} />
+                  <Text style={styles.listHeader}>
+                    {visible.length} store{visible.length === 1 ? '' : 's'} within {distance} mi ·{' '}
+                    {sort === 'price'
+                      ? 'cheapest price tier first (a rough guess from the chain name), then nearest.'
+                      : 'nearest first.'}
+                  </Text>
+                </>
+              )}
+            </View>
           }
           ListEmptyComponent={
             <Message
-              title="No grocery stores found"
-              body="OpenStreetMap lists no supermarkets or grocery stores within about 5 miles of you. Pull down to try again."
+              title={`No grocery stores within ${distance} mi`}
+              body={`OpenStreetMap lists no supermarkets or grocery stores within ${distance} mile${distance === 1 ? '' : 's'} of you.`}
+              action={
+                wider !== undefined
+                  ? { label: `Search within ${wider} mi`, onPress: () => chooseDistance(wider) }
+                  : undefined
+              }
             />
           }
-          renderItem={({ item }) => <StoreRow store={item} />}
+          renderItem={({ item }) => (
+            <StoreCard
+              store={item}
+              lines={lines}
+              results={availability.table[item.id]}
+              check={availability.checkState[item.id]}
+              tripStop={stopNumber.get(item.id) ?? null}
+              onTrip={chosen.includes(item.id)}
+              onToggleTrip={() => toggleTrip(item.id)}
+            />
+          )}
         />
       );
+    }
   }
 }
 
-function StoreRow({ store }: { store: NearbyStore }) {
+function DistanceBar({
+  distance,
+  onChange,
+}: {
+  distance: DistanceMiles;
+  onChange: (miles: DistanceMiles) => void;
+}) {
   return (
-    <View style={styles.row}>
-      <View style={styles.rowTop}>
-        <Text style={styles.storeName} numberOfLines={1}>
-          {store.name}
+    <ChipRow
+      label="Within"
+      options={DISTANCE_OPTIONS_MILES.map((m) => ({ value: m, label: `${m} mi` }))}
+      value={distance}
+      onChange={onChange}
+    />
+  );
+}
+
+function ChipRow<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <View style={styles.chipRow}>
+      <Text style={styles.chipLabel}>{label}</Text>
+      <View style={styles.chips}>
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <Pressable
+              key={String(option.value)}
+              style={[styles.chip, selected && styles.chipSelected]}
+              onPress={() => onChange(option.value)}
+              accessibilityState={{ selected }}>
+              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+/** Where "N of M found" comes from, in one line. */
+function SourceNote({
+  settings,
+  errors,
+  hasLines,
+}: {
+  settings: AppSettings;
+  errors: string[];
+  hasLines: boolean;
+}) {
+  if (!hasLines) return null;
+  const notes: string[] = [];
+  if (hasKrogerCredentials(settings)) {
+    notes.push('Item availability comes from Kroger for Kroger-family stores; other stores show “unknown”.');
+  } else {
+    notes.push('Item availability is unknown for these stores. Add Kroger keys in Settings to check Kroger-family stores.');
+  }
+  if (settings.demoAvailability) notes.push('Demo is on: “Sample data” availability is made up.');
+  return (
+    <View style={styles.sourceNote}>
+      {notes.map((note) => (
+        <Text key={note} style={styles.listHeader}>
+          {note}
         </Text>
-        <Text style={styles.distance}>{formatDistance(store.distanceKm)}</Text>
-      </View>
-      <Text style={styles.address} numberOfLines={2}>
-        {store.address ?? 'Address not listed'}
-      </Text>
-      <View style={[styles.badge, { backgroundColor: TIER_COLORS[store.tier] }]}>
-        <Text style={styles.badgeText}>{TIER_LABEL[store.tier]}</Text>
-      </View>
+      ))}
+      {errors.map((error) => (
+        <Text key={error} style={styles.errorNote}>
+          {error}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -192,14 +439,10 @@ function Message({
   );
 }
 
-const TIER_COLORS: Record<PriceTier, string> = {
-  discount: '#dff3e4',
-  standard: '#e6eef7',
-  unrated: '#eeeeee',
-  premium: '#f7e8dc',
-};
-
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   center: {
     flex: 1,
     alignItems: 'center',
@@ -243,47 +486,53 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: '#8a97a3',
-    marginBottom: 12,
+    marginBottom: 8,
   },
-  row: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: '#f5f7fa',
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e4e9ef',
+  sourceNote: {
+    marginBottom: 4,
   },
-  rowTop: {
+  errorNote: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#c0392b',
+    marginBottom: 8,
+  },
+  chipRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 0,
   },
-  storeName: {
-    flex: 1,
-    fontSize: 17,
+  chipLabel: {
+    width: 56,
+    fontSize: 13,
     fontWeight: '600',
-    marginRight: 8,
-  },
-  distance: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2f95dc',
-  },
-  address: {
-    marginTop: 2,
-    fontSize: 14,
     color: '#5b6b7b',
   },
-  badge: {
-    alignSelf: 'flex-start',
-    marginTop: 8,
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 6,
+  chips: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
   },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '600',
+  chip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#d4dbe3',
+    backgroundColor: '#fff',
+  },
+  chipSelected: {
+    backgroundColor: '#2f95dc',
+    borderColor: '#2f95dc',
+  },
+  chipText: {
+    fontSize: 14,
     color: '#33414e',
+  },
+  chipTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });

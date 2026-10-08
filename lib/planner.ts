@@ -3,9 +3,9 @@
  * fitting the resulting grocery list under a budget cap.
  *
  * Like `lib/shoppingList.ts`, nothing here touches React, SQLite, or the
- * network. Prices do not exist yet, so budgeting takes a `PriceEstimator`
- * function; `placeholderEstimator` stands in until a real price source
- * (stores/products/prices) plugs into the same signature.
+ * network. Budgeting takes a `PriceEstimator` function; the app passes
+ * `averagePriceEstimator` (`lib/prices/estimate.ts`, bundled US average
+ * prices), and any future price source plugs into the same signature.
  *
  * Money is handled in integer cents to avoid floating-point drift.
  */
@@ -189,44 +189,6 @@ export function priceLines(
 }
 
 /**
- * Assumed package sizes for the placeholder estimator, keyed by lowercase unit.
- * A line is charged one flat price per package it needs.
- */
-const PLACEHOLDER_PACK_SIZES: Record<string, number> = {
-  g: 500,
-  gram: 500,
-  grams: 500,
-  kg: 1,
-  ml: 1000,
-  l: 1,
-  liter: 1,
-  litre: 1,
-  oz: 16,
-  lb: 1,
-  lbs: 1,
-  cup: 4,
-  cups: 4,
-  tbsp: 16,
-  tsp: 48,
-  clove: 10,
-  cloves: 10,
-};
-
-export const PLACEHOLDER_PACK_CENTS = 300;
-
-/**
- * Stand-in price source until real prices exist: $3.00 per package, where the
- * package count comes from a rough per-unit pack size (unitless counts are one
- * item per package). Free-text amounts count as one package. Deliberately
- * crude — it only has to grow with quantity so budget trimming behaves.
- */
-export const placeholderEstimator: PriceEstimator = (line) => {
-  if (line.quantity === null || line.quantity <= 0) return PLACEHOLDER_PACK_CENTS;
-  const packSize = PLACEHOLDER_PACK_SIZES[(line.unit ?? '').trim().toLowerCase()] ?? 1;
-  return Math.max(1, Math.ceil(line.quantity / packSize - 1e-9)) * PLACEHOLDER_PACK_CENTS;
-};
-
-/**
  * Build the full plan: assign meals for the scope, scale to the household,
  * price the list, and, when a cap is set, drop meals from the end until the
  * known total fits. Whole meals are dropped rather than single ingredients so
@@ -237,7 +199,7 @@ export const placeholderEstimator: PriceEstimator = (line) => {
 export function planMeals(
   recipes: PlanRecipe[],
   settings: PlanSettings,
-  estimate: PriceEstimator = placeholderEstimator
+  estimate: PriceEstimator
 ): PlanResult {
   const householdSize = normalizeHouseholdSize(settings.householdSize);
   const requestedSlots = assignMeals(

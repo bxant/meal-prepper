@@ -5,9 +5,19 @@ import { Pressable, Text } from 'react-native';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { ShoppingSummaryProvider, useShoppingSummary } from '@/components/ShoppingSummary';
 
 export default function TabLayout() {
+  return (
+    <ShoppingSummaryProvider>
+      <TabNavigator />
+    </ShoppingSummaryProvider>
+  );
+}
+
+function TabNavigator() {
   const colorScheme = useColorScheme();
+  const { summary } = useShoppingSummary();
 
   return (
     <Tabs
@@ -17,6 +27,23 @@ export default function TabLayout() {
         // to prevent a hydration error in React Navigation v6.
         headerShown: useClientOnlyValue(false, true),
       }}>
+      <Tabs.Screen
+        name="plan"
+        options={{
+          title: 'Plan',
+          tabBarIcon: ({ color }) => (
+            <SymbolView
+              name={{
+                ios: 'calendar',
+                android: 'calendar_month',
+                web: 'calendar_month',
+              }}
+              tintColor={color}
+              size={28}
+            />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="index"
         options={{
@@ -52,15 +79,18 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="plan"
+        name="shopping"
         options={{
-          title: 'Plan',
+          title: 'Shopping List',
+          tabBarLabel: 'Shopping',
+          // Unchecked items left to buy; no badge once everything is ticked off.
+          tabBarBadge: summary.remaining > 0 ? summary.remaining : undefined,
           tabBarIcon: ({ color }) => (
             <SymbolView
               name={{
-                ios: 'calendar',
-                android: 'calendar_month',
-                web: 'calendar_month',
+                ios: 'checklist',
+                android: 'checklist',
+                web: 'checklist',
               }}
               tintColor={color}
               size={28}
@@ -72,6 +102,20 @@ export default function TabLayout() {
         name="stores"
         options={{
           title: 'Stores & Prices',
+          headerRight: () => (
+            <Link href="/settings" asChild>
+              <Pressable style={{ marginRight: 15 }} hitSlop={8} accessibilityLabel="Settings">
+                {({ pressed }) => (
+                  <SymbolView
+                    name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
+                    tintColor={Colors[colorScheme].tint}
+                    size={24}
+                    style={{ opacity: pressed ? 0.5 : 1 }}
+                  />
+                )}
+              </Pressable>
+            </Link>
+          ),
           tabBarIcon: ({ color }) => (
             <SymbolView
               name={{

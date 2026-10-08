@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +14,10 @@ import {
 } from 'react-native';
 
 import { insertRecipeWithIngredients, type NewIngredientInput } from '@/db/recipes';
+import { createOcrSpaceRecognizer, OcrError } from '@/lib/ocr';
+import { pickRecipePhoto, type PhotoSource } from '@/lib/photoImport';
+import { parseRecipeText } from '@/lib/recipeImport';
+import { loadSettings } from '@/lib/settings';
 import { parseQuantity } from '@/lib/shoppingList';
 
 interface DraftIngredient {
@@ -24,9 +29,13 @@ interface DraftIngredient {
 }
 
 let draftCounter = 0;
-function newDraft(): DraftIngredient {
+function newDraft(fields: Partial<Omit<DraftIngredient, 'key'>> = {}): DraftIngredient {
   draftCounter += 1;
-  return { key: `draft-${draftCounter}`, name: '', quantity: '', unit: '', grams: '' };
+  return { key: `draft-${draftCounter}`, name: '', quantity: '', unit: '', grams: '', ...fields };
+}
+
+function isBlank(row: DraftIngredient): boolean {
+  return [row.name, row.quantity, row.unit, row.grams].every((value) => value.trim() === '');
 }
 
 export default function NewRecipeScreen() {
@@ -37,6 +46,54 @@ export default function NewRecipeScreen() {
   const [ingredients, setIngredients] = useState<DraftIngredient[]>([newDraft()]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<{ text: string; isError: boolean; needsKey?: boolean } | null>(null);
+
+  /** Read a recipe photo into the form; the user reviews everything before saving. */
+  const importPhoto = async (source: PhotoSource) => {
+    setImportMessage(null);
+    const { ocrSpaceApiKey } = await loadSettings();
+    if (ocrSpaceApiKey.trim() === '') {
+      setImportMessage({
+        text: 'Add your free OCR.space API key in Settings to import from a photo.',
+        isError: true,
+        needsKey: true,
+      });
+      return;
+    }
+    try {
+      const image = await pickRecipePhoto(source);
+      if (!image) return;
+      setImporting(true);
+      const text = await createOcrSpaceRecognizer(ocrSpaceApiKey).recognize(image);
+      const recipe = parseRecipeText(text);
+      if (recipe.ingredients.length === 0) {
+        setImportMessage({
+          text: "Couldn't find an ingredient list in that photo. Try cropping it to just the ingredients.",
+          isError: true,
+        });
+        return;
+      }
+      if (recipe.title && title.trim() === '') setTitle(recipe.title);
+      if (recipe.servings && servingsText.trim() === '') setServingsText(String(recipe.servings));
+      setIngredients((rows) => [
+        ...rows.filter((row) => !isBlank(row)),
+        ...recipe.ingredients.map((row) => newDraft(row)),
+      ]);
+      setError(null);
+      setImportMessage({
+        text: `Read ${recipe.ingredients.length} ingredient${recipe.ingredients.length === 1 ? '' : 's'} from the photo. Check them below — fix or remove anything misread — then save.`,
+        isError: false,
+      });
+    } catch (e) {
+      setImportMessage({
+        text: e instanceof OcrError ? e.message : "Couldn't read that photo. Try again.",
+        isError: true,
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const updateIngredient = (key: string, field: keyof DraftIngredient, value: string) => {
     setIngredients((rows) => rows.map((row) => (row.key === key ? { ...row, [field]: value } : row)));
@@ -110,6 +167,44 @@ export default function NewRecipeScreen() {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.importCard}>
+          <Text style={styles.importTitle}>Import from a photo</Text>
+          <Text style={styles.hint}>
+            A cookbook page or a saved screenshot. The photo is sent to OCR.space to read its
+            text; you review the ingredients before saving.
+          </Text>
+          <View style={styles.importButtons}>
+            <Pressable
+              style={[styles.importButton, importing && styles.saveButtonDisabled]}
+              onPress={() => void importPhoto('camera')}
+              disabled={importing}>
+              <Text style={styles.importButtonText}>Take photo</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.importButton, importing && styles.saveButtonDisabled]}
+              onPress={() => void importPhoto('library')}
+              disabled={importing}>
+              <Text style={styles.importButtonText}>Choose screenshot</Text>
+            </Pressable>
+          </View>
+          {importing && (
+            <View style={styles.importStatus}>
+              <ActivityIndicator />
+              <Text style={styles.hint}>Reading the recipe…</Text>
+            </View>
+          )}
+          {importMessage && (
+            <Text style={importMessage.isError ? styles.error : styles.importNotice}>
+              {importMessage.text}
+            </Text>
+          )}
+          {importMessage?.needsKey && (
+            <Pressable onPress={() => router.push('/settings')}>
+              <Text style={styles.importLink}>Open Settings</Text>
+            </Pressable>
+          )}
+        </View>
+
         <Text style={styles.label}>Title</Text>
         <TextInput
           style={styles.input}
@@ -208,7 +303,8 @@ export default function NewRecipeScreen() {
         </Pressable>
 
         <Text style={styles.privacyNote}>
-          Saved only on this device — no account, nothing uploaded.
+          Saved only on this device — no account. A photo you import is sent to OCR.space
+          only to read its text.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -218,6 +314,52 @@ export default function NewRecipeScreen() {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
+  },
+  importCard: {
+    borderWidth: 1,
+    borderColor: '#e4e9ef',
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#f5f9fd',
+  },
+  importTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  importButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  importButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#2f95dc',
+    alignItems: 'center',
+  },
+  importButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  importStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  importNotice: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#2e7d32',
+  },
+  importLink: {
+    marginTop: 6,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2f95dc',
   },
   content: {
     padding: 16,
