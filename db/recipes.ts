@@ -10,9 +10,18 @@ export interface RecipeSummary {
   createdAt: number;
 }
 
+/** A stored ingredient plus the user's nutrition overrides (NULL = derive automatically). */
+export interface RecipeIngredientDetail extends StoredIngredient {
+  grams: number | null;
+  nutritionFoodId: string | null;
+}
+
 export interface RecipeWithIngredients extends RecipeIngredients {
   source: 'manual' | 'photo';
   createdAt: number;
+  /** NULL until the user sets how many servings the recipe makes. */
+  servings: number | null;
+  ingredients: RecipeIngredientDetail[];
 }
 
 export interface NewIngredientInput {
@@ -21,10 +30,13 @@ export interface NewIngredientInput {
   unit: string | null;
   rawText: string;
   parsedOk: boolean;
+  /** Optional measured weight, used for the nutrition estimate. */
+  grams: number | null;
 }
 
 export interface NewRecipeInput {
   title: string;
+  servings: number | null;
   ingredients: NewIngredientInput[];
 }
 
@@ -37,12 +49,13 @@ export async function insertRecipeWithIngredients(
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      'INSERT INTO recipes (id, title, source, notes, photo_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO recipes (id, title, source, notes, photo_path, servings, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       recipeId,
       input.title,
       'manual',
       null,
       null,
+      input.servings,
       now,
       now
     );
@@ -50,7 +63,7 @@ export async function insertRecipeWithIngredients(
     for (let position = 0; position < input.ingredients.length; position += 1) {
       const ingredient = input.ingredients[position];
       await db.runAsync(
-        'INSERT INTO ingredients (id, recipe_id, position, raw_text, name, quantity, unit, parsed_ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO ingredients (id, recipe_id, position, raw_text, name, quantity, unit, parsed_ok, grams) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         newId(),
         recipeId,
         position,
@@ -58,7 +71,8 @@ export async function insertRecipeWithIngredients(
         ingredient.name,
         ingredient.quantity,
         ingredient.unit,
-        ingredient.parsedOk ? 1 : 0
+        ingredient.parsedOk ? 1 : 0,
+        ingredient.grams
       );
     }
   });
@@ -96,8 +110,9 @@ export async function getRecipeWithIngredients(
     id: string;
     title: string;
     source: string;
+    servings: number | null;
     created_at: number;
-  }>('SELECT id, title, source, created_at FROM recipes WHERE id = ?', recipeId);
+  }>('SELECT id, title, source, servings, created_at FROM recipes WHERE id = ?', recipeId);
 
   if (!recipe) return null;
 
@@ -107,8 +122,10 @@ export async function getRecipeWithIngredients(
     quantity: number | null;
     unit: string | null;
     raw_text: string | null;
+    grams: number | null;
+    nutrition_food_id: string | null;
   }>(
-    'SELECT id, name, quantity, unit, raw_text FROM ingredients WHERE recipe_id = ? ORDER BY position',
+    'SELECT id, name, quantity, unit, raw_text, grams, nutrition_food_id FROM ingredients WHERE recipe_id = ? ORDER BY position',
     recipeId
   );
 
@@ -117,16 +134,46 @@ export async function getRecipeWithIngredients(
     title: recipe.title,
     source: recipe.source === 'photo' ? 'photo' : 'manual',
     createdAt: recipe.created_at,
+    servings: recipe.servings,
     ingredients: ingredientRows.map(
-      (row): StoredIngredient => ({
+      (row): RecipeIngredientDetail => ({
         id: row.id,
         name: row.name,
         quantity: row.quantity,
         unit: row.unit,
         rawText: row.raw_text,
+        grams: row.grams,
+        nutritionFoodId: row.nutrition_food_id,
       })
     ),
   };
+}
+
+export async function updateRecipeServings(
+  db: SQLiteDatabase,
+  recipeId: string,
+  servings: number | null
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE recipes SET servings = ?, updated_at = ? WHERE id = ?',
+    servings,
+    Date.now(),
+    recipeId
+  );
+}
+
+/** Save the user's nutrition overrides for one ingredient (NULL = back to automatic). */
+export async function updateIngredientNutrition(
+  db: SQLiteDatabase,
+  ingredientId: string,
+  overrides: { grams: number | null; nutritionFoodId: string | null }
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE ingredients SET grams = ?, nutrition_food_id = ? WHERE id = ?',
+    overrides.grams,
+    overrides.nutritionFoodId,
+    ingredientId
+  );
 }
 
 /** All recipes with their ingredients — the input for the shopping-list aggregate. */
