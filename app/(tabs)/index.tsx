@@ -3,12 +3,16 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useShoppingSummary } from '@/components/ShoppingSummary';
 import { listRecipes, type RecipeSummary } from '@/db/recipes';
+import { describeShoppingList } from '@/lib/shoppingListSummary';
 
 export default function RecipesScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
+  const { summary, refresh: refreshSummary } = useShoppingSummary();
+  const hasItemsToBuy = summary.remaining > 0;
 
   useFocusEffect(
     useCallback(() => {
@@ -20,20 +24,34 @@ export default function RecipesScreen() {
         .catch(() => {
           // The local DB is the only source; an empty list degrades gracefully.
         });
+      // Saving a recipe returns here, so this keeps the "to buy" count current.
+      refreshSummary().catch(() => {});
       return () => {
         active = false;
       };
-    }, [db])
+    }, [db, refreshSummary])
   );
 
   return (
     <View style={styles.container}>
       <Pressable
-        style={styles.shoppingListBanner}
-        onPress={() => router.push('/shopping-list')}
+        style={[styles.shoppingListBanner, !hasItemsToBuy && styles.shoppingListBannerIdle]}
+        onPress={() => router.navigate('/shopping')}
         testID="shopping-list-banner">
-        <Text style={styles.bannerTitle}>Shopping list</Text>
-        <Text style={styles.bannerSubtitle}>Combined ingredients from all your recipes</Text>
+        {hasItemsToBuy && (
+          <View style={styles.bannerBadge}>
+            <Text style={styles.bannerBadgeText}>{summary.remaining}</Text>
+          </View>
+        )}
+        <View style={styles.bannerText}>
+          <Text style={styles.bannerTitle}>
+            {hasItemsToBuy ? describeShoppingList(summary) : 'Shopping list'}
+          </Text>
+          <Text style={styles.bannerSubtitle}>
+            {hasItemsToBuy ? 'Tap to open your shopping list' : describeShoppingList(summary)}
+          </Text>
+        </View>
+        <Text style={styles.bannerChevron}>›</Text>
       </Pressable>
 
       <FlatList
@@ -75,13 +93,43 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   shoppingListBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginHorizontal: 16,
     marginTop: 16,
     padding: 16,
     borderRadius: 12,
     backgroundColor: '#E6F4FE',
     borderWidth: 1,
-    borderColor: '#cfe6fb',
+    borderColor: '#2f95dc',
+  },
+  shoppingListBannerIdle: {
+    backgroundColor: '#f5f7fa',
+    borderColor: '#e4e9ef',
+  },
+  bannerBadge: {
+    minWidth: 36,
+    height: 36,
+    borderRadius: 18,
+    paddingHorizontal: 8,
+    marginRight: 12,
+    backgroundColor: '#2f95dc',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bannerBadgeText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  bannerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  bannerChevron: {
+    marginLeft: 8,
+    fontSize: 26,
+    color: '#8a97a3',
   },
   bannerTitle: {
     fontSize: 17,

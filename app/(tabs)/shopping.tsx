@@ -1,8 +1,9 @@
 import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useShoppingSummary } from '@/components/ShoppingSummary';
 import { listRecipesWithIngredients } from '@/db/recipes';
 import {
   setShoppingListItemChecked,
@@ -10,11 +11,29 @@ import {
   type ShoppingListItem,
 } from '@/db/shoppingList';
 import { buildShoppingList, shoppingListKey, type ShoppingListLine } from '@/lib/shoppingList';
+import { describeShoppingList, summarizeShoppingList } from '@/lib/shoppingListSummary';
 
 export default function ShoppingListScreen() {
   const db = useSQLiteContext();
   const [items, setItems] = useState<ShoppingListItem[]>([]);
   const [lineByKey, setLineByKey] = useState<Map<string, ShoppingListLine>>(new Map());
+  const [loaded, setLoaded] = useState(false);
+  const { setSummary } = useShoppingSummary();
+
+  // Rows are already synced to the aggregate, so they double as its lines.
+  const summary = useMemo(
+    () =>
+      summarizeShoppingList(
+        items.map((item) => ({ key: shoppingListKey(item.itemName, item.unit) })),
+        items
+      ),
+    [items]
+  );
+
+  // Keep the tab badge in step with every toggle on this screen.
+  useEffect(() => {
+    if (loaded) setSummary(summary);
+  }, [loaded, summary, setSummary]);
 
   const refresh = useCallback(async () => {
     const recipes = await listRecipesWithIngredients(db);
@@ -22,6 +41,7 @@ export default function ShoppingListScreen() {
     const rows = await syncShoppingList(db, lines);
     setLineByKey(new Map(lines.map((line) => [line.key, line])));
     setItems(rows);
+    setLoaded(true);
   }, [db]);
 
   useFocusEffect(
@@ -39,7 +59,9 @@ export default function ShoppingListScreen() {
       try {
         await setShoppingListItemChecked(db, item.id, next);
       } catch {
-        setItems((rows) => rows.map((row) => (row.id === item.id ? { ...row, checked: !next } : row)));
+        setItems((rows) =>
+          rows.map((row) => (row.id === item.id ? { ...row, checked: !next } : row))
+        );
       }
     },
     [db]
@@ -55,15 +77,26 @@ export default function ShoppingListScreen() {
 
   return (
     <View style={styles.container}>
+      {summary.total > 0 && (
+        <View
+          style={[styles.summaryBar, summary.remaining === 0 && styles.summaryBarDone]}
+          testID="shopping-summary">
+          <Text style={[styles.summaryCount, summary.remaining === 0 && styles.summaryCountDone]}>
+            {summary.remaining === 0 ? '✓' : summary.remaining}
+          </Text>
+          <Text style={styles.summaryText}>{describeShoppingList(summary)}</Text>
+        </View>
+      )}
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Nothing to shop yet</Text>
+            <Text style={styles.emptyTitle}>Nothing to buy</Text>
             <Text style={styles.emptyBody}>
-              Save a recipe and its ingredients appear here, combined across all your recipes.
+              Your list is empty. Save a recipe and its ingredients appear here, combined across all
+              your recipes.
             </Text>
           </View>
         }
@@ -94,6 +127,44 @@ export default function ShoppingListScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  summaryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#E6F4FE',
+    borderWidth: 1,
+    borderColor: '#cfe6fb',
+  },
+  summaryBarDone: {
+    backgroundColor: '#e8f6ec',
+    borderColor: '#c7e8d1',
+  },
+  summaryCount: {
+    minWidth: 32,
+    height: 32,
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    marginRight: 12,
+    overflow: 'hidden',
+    backgroundColor: '#2f95dc',
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 32,
+    textAlign: 'center',
+  },
+  summaryCountDone: {
+    backgroundColor: '#2e9e5b',
+  },
+  summaryText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
   },
   listContent: {
     padding: 16,
