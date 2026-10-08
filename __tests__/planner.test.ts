@@ -5,8 +5,6 @@ import {
   mealCountForScope,
   normalizeHouseholdSize,
   parseBudgetCents,
-  placeholderEstimator,
-  PLACEHOLDER_PACK_CENTS,
   planMeals,
   priceLines,
   recipeServings,
@@ -134,14 +132,6 @@ describe('scaling', () => {
 });
 
 describe('pricing', () => {
-  it('placeholder charges per assumed package', () => {
-    expect(placeholderEstimator(line({ quantity: 400, unit: 'g' }))).toBe(PLACEHOLDER_PACK_CENTS);
-    expect(placeholderEstimator(line({ quantity: 501, unit: 'g' }))).toBe(2 * PLACEHOLDER_PACK_CENTS);
-    expect(placeholderEstimator(line({ quantity: 3, unit: null }))).toBe(3 * PLACEHOLDER_PACK_CENTS);
-    expect(placeholderEstimator(line({ quantity: 0.25, unit: 'Unknown' }))).toBe(PLACEHOLDER_PACK_CENTS);
-    expect(placeholderEstimator(line({ quantity: null }))).toBe(PLACEHOLDER_PACK_CENTS);
-  });
-
   it('totals known prices and counts unknown ones', () => {
     const estimate: PriceEstimator = (l) => (l.name === 'unknown' ? null : 125.4);
     const result = priceLines([line({ name: 'a' }), line({ name: 'unknown' })], estimate);
@@ -205,18 +195,8 @@ describe('planMeals', () => {
     expect(result.overBudget).toBe(false);
   });
 
-  it('defaults to the placeholder estimator', () => {
-    const result = planMeals([tacos], {
-      householdSize: 1,
-      scope: 'one-meal',
-      budgetCapCents: null,
-    });
-    // 2 tortillas (2 packs) + 1 garlic clove (1 pack).
-    expect(result.totalCents).toBe(3 * PLACEHOLDER_PACK_CENTS);
-  });
-
   it('returns an empty plan without recipes', () => {
-    const result = planMeals([], { householdSize: 3, scope: 'week', budgetCapCents: 1000 });
+    const result = planMeals([], { householdSize: 3, scope: 'week', budgetCapCents: 1000 }, flat);
     expect(result.slots).toEqual([]);
     expect(result.lines).toEqual([]);
     expect(result.overBudget).toBe(false);

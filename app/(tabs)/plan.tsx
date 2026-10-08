@@ -10,11 +10,11 @@ import {
   MEAL_SCOPES,
   normalizeHouseholdSize,
   parseBudgetCents,
-  placeholderEstimator,
   planMeals,
   type MealScope,
   type PlanRecipe,
 } from '@/lib/planner';
+import { AVERAGE_PRICE_LABEL, averagePriceEstimator } from '@/lib/prices/estimate';
 
 /**
  * Placeholder planning panel: household size, meal scope, and a budget cap
@@ -52,7 +52,7 @@ export default function PlanScreen() {
     [recipes, excludedIds]
   );
   const plan = useMemo(
-    () => planMeals(selected, { householdSize, scope, budgetCapCents }, placeholderEstimator),
+    () => planMeals(selected, { householdSize, scope, budgetCapCents }, averagePriceEstimator),
     [selected, householdSize, scope, budgetCapCents]
   );
 
@@ -152,12 +152,15 @@ export default function PlanScreen() {
           )}
 
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Estimated total</Text>
+            <Text style={styles.totalLabel}>Expected total</Text>
             <Text style={styles.totalValue}>{formatCents(plan.totalCents)}</Text>
           </View>
           <Text style={styles.note}>
-            Placeholder estimate (~$3 per package) until real store prices arrive.
-            {plan.unpricedCount > 0 ? ` ${plan.unpricedCount} item(s) unpriced.` : ''}
+            Cost of the amounts your recipes use, at {AVERAGE_PRICE_LABEL} — not a quote
+            from any store.
+            {plan.unpricedCount > 0
+              ? ` ${plan.unpricedCount} item(s) have no average price and aren't counted.`
+              : ''}
           </Text>
 
           {plan.lines.map((line) => (
