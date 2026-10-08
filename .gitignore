@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# expo / react native
+.expo/
+dist/
+web-build/
+
+# native build output
+android/
+ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# os / editor
+.DS_Store
+*.log
+
+# typescript / tooling caches
+*.tsbuildinfo
+.eslintcache
