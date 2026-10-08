@@ -5,9 +5,19 @@ import { Pressable, Text } from 'react-native';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { ShoppingSummaryProvider, useShoppingSummary } from '@/components/ShoppingSummary';
 
 export default function TabLayout() {
+  return (
+    <ShoppingSummaryProvider>
+      <TabNavigator />
+    </ShoppingSummaryProvider>
+  );
+}
+
+function TabNavigator() {
   const colorScheme = useColorScheme();
+  const { summary } = useShoppingSummary();
 
   return (
     <Tabs
@@ -48,6 +58,26 @@ export default function TabLayout() {
                 )}
               </Pressable>
             </Link>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="shopping"
+        options={{
+          title: 'Shopping List',
+          tabBarLabel: 'Shopping',
+          // Unchecked items left to buy; no badge once everything is ticked off.
+          tabBarBadge: summary.remaining > 0 ? summary.remaining : undefined,
+          tabBarIcon: ({ color }) => (
+            <SymbolView
+              name={{
+                ios: 'checklist',
+                android: 'checklist',
+                web: 'checklist',
+              }}
+              tintColor={color}
+              size={28}
+            />
           ),
         }}
       />

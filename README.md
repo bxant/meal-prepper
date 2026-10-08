@@ -34,15 +34,16 @@ Scan the QR code with **Expo Go** on your Android phone or iPhone.
 
 ```sh
 npm run typecheck   # tsc --noEmit
-npm test            # jest (pure shopping-list aggregation contract)
+npm test            # jest (pure shopping-list aggregation + summary)
 npx expo export --platform android   # proves the bundle compiles
 ```
 
 ## Project layout
 
-- `app/` — Expo Router routes: `(tabs)/` (Recipes, Stores & Prices),
-  `recipe/new.tsx` (form modal), `recipe/[id].tsx` (detail),
-  `shopping-list.tsx`
+- `app/` — Expo Router routes: `(tabs)/` (Recipes, Shopping — badged with
+  the unchecked-item count — and Stores & Prices), `recipe/new.tsx` (form
+  modal), `recipe/[id].tsx` (detail)
 - `db/` — `schema.ts` (versioned migrations; add future tables here),
   `recipes.ts`, `shoppingList.ts` (queries)
-- `lib/` — pure helpers (`shoppingList.ts` aggregation contract, `id.ts`)
+- `lib/` — pure helpers (`shoppingList.ts` aggregation contract,
+  `shoppingListSummary.ts` items-left count, `id.ts`)
