@@ -16,15 +16,21 @@ export interface ShoppingListSummary {
 
 export const EMPTY_SUMMARY: ShoppingListSummary = { total: 0, remaining: 0 };
 
-export function summarizeShoppingList(
-  lines: { key: string }[],
-  items: { itemName: string; unit: string | null; checked: boolean }[]
-): ShoppingListSummary {
+type PersistedItem = { itemName: string; unit: string | null; checked: boolean };
+
+/** Lines not yet ticked off: what is still left to buy. */
+export function remainingLines<T extends { key: string }>(lines: T[], items: PersistedItem[]): T[] {
   const checkedKeys = new Set(
     items.filter((item) => item.checked).map((item) => shoppingListKey(item.itemName, item.unit))
   );
-  const remaining = lines.filter((line) => !checkedKeys.has(line.key)).length;
-  return { total: lines.length, remaining };
+  return lines.filter((line) => !checkedKeys.has(line.key));
+}
+
+export function summarizeShoppingList(
+  lines: { key: string }[],
+  items: PersistedItem[]
+): ShoppingListSummary {
+  return { total: lines.length, remaining: remainingLines(lines, items).length };
 }
 
 function itemCount(count: number): string {

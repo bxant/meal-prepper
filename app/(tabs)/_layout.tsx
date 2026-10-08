@@ -102,6 +102,20 @@ function TabNavigator() {
         name="stores"
         options={{
           title: 'Stores & Prices',
+          headerRight: () => (
+            <Link href="/settings" asChild>
+              <Pressable style={{ marginRight: 15 }} hitSlop={8} accessibilityLabel="Settings">
+                {({ pressed }) => (
+                  <SymbolView
+                    name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
+                    tintColor={Colors[colorScheme].tint}
+                    size={24}
+                    style={{ opacity: pressed ? 0.5 : 1 }}
+                  />
+                )}
+              </Pressable>
+            </Link>
+          ),
           tabBarIcon: ({ color }) => (
             <SymbolView
               name={{

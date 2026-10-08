@@ -1,5 +1,5 @@
 import { buildShoppingList, type RecipeIngredients } from '../lib/shoppingList';
-import { describeShoppingList, summarizeShoppingList } from '../lib/shoppingListSummary';
+import { describeShoppingList, remainingLines, summarizeShoppingList } from '../lib/shoppingListSummary';
 
 const recipes: RecipeIngredients[] = [
   {
@@ -57,5 +57,20 @@ describe('describeShoppingList', () => {
     expect(describeShoppingList({ total: 4, remaining: 4 })).toBe('4 items to buy');
     expect(describeShoppingList({ total: 4, remaining: 1 })).toBe('1 item left to buy (of 4)');
     expect(describeShoppingList({ total: 4, remaining: 0 })).toBe('All done — 4 items checked off');
+  });
+});
+
+describe('remainingLines', () => {
+  it('keeps only lines that are not ticked off, in order', () => {
+    const lines = [
+      { key: 'eggs|', name: 'eggs' },
+      { key: 'milk|cup', name: 'milk' },
+      { key: 'rice|g', name: 'rice' },
+    ];
+    const items = [
+      { itemName: 'Eggs', unit: null, checked: true },
+      { itemName: 'milk', unit: 'cup', checked: false },
+    ];
+    expect(remainingLines(lines, items).map((l) => l.name)).toEqual(['milk', 'rice']);
   });
 });

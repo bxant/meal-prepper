@@ -42,6 +42,15 @@
           "isAndroidBackgroundLocationEnabled": false,
           "isIosBackgroundLocationEnabled": false
         }
+      ],
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Meal Prepper reads the recipe photo or screenshot you pick so it can pull out the ingredient list.",
+          "cameraPermission": "Meal Prepper uses the camera when you photograph a recipe to import its ingredient list.",
+          "microphonePermission": false
+        }
       ]
     ],
     "experiments": {
