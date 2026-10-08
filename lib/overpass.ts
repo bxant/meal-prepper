@@ -31,6 +31,8 @@ const TIMEOUT_MS = 40000;
 const USER_AGENT = 'MealPrepper/1.0 (personal grocery app; https://github.com/bxant/meal-prepper)';
 
 const BUSY_MESSAGE = 'The store directory (OpenStreetMap) is busy right now. Try again in a minute.';
+// Overpass allows each IP two query slots, freed a little after each query ends.
+const RATE_LIMITED_MESSAGE = 'Too many store searches in a row. Wait a minute, then try again.';
 const UNREADABLE_MESSAGE = 'The store directory sent an unreadable response. Try again.';
 
 export class StoreLookupError extends Error {}
@@ -66,9 +68,11 @@ async function queryOnce(url: string, body: string, origin: LatLng): Promise<Nea
     }
     if (!response.ok) {
       throw new StoreLookupError(
-        response.status === 429 || response.status >= 500
-          ? BUSY_MESSAGE
-          : `The store directory returned an error (${response.status}). Try again later.`
+        response.status === 429
+          ? RATE_LIMITED_MESSAGE
+          : response.status >= 500
+            ? BUSY_MESSAGE
+            : `The store directory returned an error (${response.status}). Try again later.`
       );
     }
     let json: unknown;

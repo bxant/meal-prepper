@@ -120,10 +120,10 @@ describe('fetchNearbyStores', () => {
     expect(urls[1]).not.toBe(urls[0]);
   });
 
-  it('reports a rate limit as busy', async () => {
+  it('reports the per-IP rate limit as such', async () => {
     globalThis.fetch = jest.fn().mockResolvedValue(jsonResponse(null, 429));
     const error = await fetchNearbyStores(position, 5, fast).catch((e) => e);
-    expect(error.message).toMatch(/busy/);
+    expect(error.message).toMatch(/Too many store searches/);
   });
 
   it('reports a non-Overpass body as unreadable rather than empty', async () => {
