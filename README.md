@@ -16,14 +16,12 @@ currently ships milestone **M1**: "recipe in → shopping list out".
   its ingredients.
 - **Shopping list** — one aggregated, checkable list built from the ingredients
   of all saved recipes.
-- **Stores & Prices tab** — asks for location permission (foreground only,
-  while the app is open) and lists nearby supermarkets and grocery stores from
-  OpenStreetMap with name, distance, and address. Stores are ranked by a
-  clearly-labelled *estimated* price tier (known discount chains such as Aldi,
-  Lidl, Walmart, WinCo, and Food 4 Less first, then standard, unrated, and
-  premium chains), then by distance. There is no real price data yet; the tier
-  list lives in `lib/storeTiers.ts` so prices (Walmart as the baseline) can
-  replace it later. Results are kept in memory only.
+- **Plan tab** — placeholder planning panel: household size, meal scope (one
+  meal, two meals, or a whole week), and a budget cap scale the chosen recipes
+  into one list with an estimated total, dropping meals from the end to fit the
+  cap. Prices are a rough placeholder estimate; settings are not saved yet.
+- **Stores & Prices tab** — placeholder; stores, location, and prices come in
+  later milestones.
 
 ## Privacy
 
@@ -52,18 +50,16 @@ Scan the QR code with **Expo Go** on your Android phone or iPhone.
 
 ```sh
 npm run typecheck   # tsc --noEmit
-npm test            # jest (shopping-list aggregation, store ranking/distance)
+npm test            # jest (pure shopping-list and planner contracts)
 npx expo export --platform android   # proves the bundle compiles
 ```
 
 ## Project layout
 
-- `app/` — Expo Router routes: `(tabs)/` (Recipes, Stores & Prices),
+- `app/` — Expo Router routes: `(tabs)/` (Recipes, Plan, Stores & Prices),
   `recipe/new.tsx` (form modal), `recipe/[id].tsx` (detail),
   `shopping-list.tsx`
 - `db/` — `schema.ts` (versioned migrations; add future tables here),
   `recipes.ts`, `shoppingList.ts` (queries)
-- `lib/` — pure helpers (`shoppingList.ts` aggregation contract, `id.ts`,
-  `geo.ts` distance/coarsening, `storeTiers.ts` affordability tiers,
-  `nearbyStores.ts` Overpass query/parse/rank) and `overpass.ts`, the app's
-  only network call
+- `lib/` — pure helpers (`shoppingList.ts` aggregation contract,
+  `planner.ts` scaling + budget fitting, `id.ts`)
