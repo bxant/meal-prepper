@@ -6,7 +6,7 @@ export interface LatLng {
 }
 
 const EARTH_RADIUS_KM = 6371;
-const KM_PER_MILE = 1.609344;
+export const KM_PER_MILE = 1.609344;
 
 /** Great-circle distance in kilometres (haversine). */
 export function distanceKm(a: LatLng, b: LatLng): number {

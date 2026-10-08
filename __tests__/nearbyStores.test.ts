@@ -2,8 +2,13 @@ import { coarsen, distanceKm, formatDistance } from '../lib/geo';
 import {
   buildOverpassQuery,
   formatAddress,
+  OverpassResponseError,
   parseOverpassResponse,
   rankStores,
+  searchRadiusMeters,
+  selectStores,
+  sortByDistance,
+  withinMiles,
   type NearbyStore,
 } from '../lib/nearbyStores';
 import { tierForStore } from '../lib/storeTiers';
@@ -79,11 +84,21 @@ describe('tierForStore', () => {
 });
 
 describe('buildOverpassQuery', () => {
+  it('pads the search circle by 1 km for the coarsened origin', () => {
+    expect(searchRadiusMeters(1)).toBe(1609 + 1000);
+    expect(searchRadiusMeters(25)).toBe(40234 + 1000);
+  });
+
   it('embeds the given point and radius', () => {
     const q = buildOverpassQuery({ latitude: 34.05, longitude: -118.24 }, 5000);
     expect(q).toContain('around:5000,34.05,-118.24');
     expect(q).toContain('[out:json]');
     expect(q).toContain('out center');
+  });
+
+  it('also asks for Target/Walmart, which OSM tags as department stores', () => {
+    const q = buildOverpassQuery({ latitude: 34.05, longitude: -118.24 }, 5000);
+    expect(q).toContain('nwr["shop"="department_store"]["brand"~"^(Target|Walmart)$"](around:5000,34.05,-118.24)');
   });
 });
 
@@ -121,22 +136,51 @@ describe('parseOverpassResponse', () => {
     expect(stores[0].distanceKm).toBeCloseTo(1.11, 1);
   });
 
-  it('tolerates malformed responses', () => {
-    expect(parseOverpassResponse(null, origin)).toEqual([]);
-    expect(parseOverpassResponse({ elements: 'nope' }, origin)).toEqual([]);
+  it('skips malformed elements inside a valid response', () => {
     expect(parseOverpassResponse({ elements: [null] }, origin)).toEqual([]);
+  });
+
+  it('throws on a body that is not an Overpass result instead of returning []', () => {
+    expect(() => parseOverpassResponse(null, origin)).toThrow(OverpassResponseError);
+    expect(() => parseOverpassResponse({ elements: 'nope' }, origin)).toThrow(OverpassResponseError);
+  });
+
+  it('throws on a runtime-error remark even when some elements came back', () => {
+    const partial = {
+      elements: [{ type: 'node', id: 1, lat: 34.01, lon: -118.0, tags: { name: 'Aldi' } }],
+      remark: 'runtime error: Query run out of memory using about 32 MB of RAM.',
+    };
+    let error: unknown;
+    try {
+      parseOverpassResponse(partial, origin);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(OverpassResponseError);
+    expect((error as OverpassResponseError).isRuntimeError).toBe(true);
+  });
+
+  it('keeps each store’s own coordinates', () => {
+    const [store] = parseOverpassResponse(
+      { elements: [{ type: 'node', id: 1, lat: 34.01, lon: -118.02, tags: { name: 'Aldi' } }] },
+      origin
+    );
+    expect(store).toMatchObject({ latitude: 34.01, longitude: -118.02 });
   });
 });
 
-describe('rankStores', () => {
-  const store = (name: string, tier: NearbyStore['tier'], distanceKm: number): NearbyStore => ({
-    id: name,
-    name,
-    address: null,
-    distanceKm,
-    tier,
-  });
+const store = (name: string, tier: NearbyStore['tier'], distanceKm: number): NearbyStore => ({
+  id: name,
+  name,
+  brand: null,
+  address: null,
+  latitude: 0,
+  longitude: 0,
+  distanceKm,
+  tier,
+});
 
+describe('rankStores', () => {
   it('orders by tier first, then distance', () => {
     const ranked = rankStores([
       store('Whole Foods', 'premium', 0.5),
@@ -158,5 +202,39 @@ describe('rankStores', () => {
     const input = [store('B', 'premium', 1), store('A', 'discount', 1)];
     rankStores(input);
     expect(input[0].name).toBe('B');
+  });
+});
+
+describe('distance filter and sort', () => {
+  const stores = [
+    store('Whole Foods', 'premium', 0.5),
+    store('Walmart', 'discount', 7), // ~4.3 mi
+    store('Kroger', 'standard', 1.2),
+    store('Aldi', 'discount', 20), // ~12.4 mi
+  ];
+
+  it('keeps stores up to and including the chosen distance', () => {
+    expect(withinMiles(stores, 1).map((s) => s.name)).toEqual(['Whole Foods', 'Kroger']);
+    expect(withinMiles([store('Edge', 'unrated', 1.609344)], 1)).toHaveLength(1);
+  });
+
+  it('sorts nearest first, breaking ties by cheaper tier', () => {
+    expect(
+      sortByDistance([...stores, store('Corner', 'unrated', 1.2)]).map((s) => s.name)
+    ).toEqual(['Whole Foods', 'Kroger', 'Corner', 'Walmart', 'Aldi']);
+  });
+
+  it('ranks by affordability within the chosen distance by default', () => {
+    expect(selectStores(stores, 5, 'price').map((s) => s.name)).toEqual([
+      'Walmart',
+      'Kroger',
+      'Whole Foods',
+    ]);
+    expect(selectStores(stores, 25, 'price')[0].name).toBe('Walmart');
+    expect(selectStores(stores, 5, 'distance').map((s) => s.name)).toEqual([
+      'Whole Foods',
+      'Kroger',
+      'Walmart',
+    ]);
   });
 });
